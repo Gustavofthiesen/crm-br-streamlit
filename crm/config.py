@@ -51,5 +51,11 @@ def get_admin_password() -> str | None:
     )
 
 
+def get_admin_setup_token() -> str | None:
+    return os.getenv("CRM_SETUP_TOKEN") or _read_streamlit_secret(
+        "admin", "setup_token"
+    )
+
+
 def get_timezone_name() -> str:
     return "America/Sao_Paulo"

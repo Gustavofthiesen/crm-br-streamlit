@@ -9,10 +9,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+from crm.config import get_admin_email, get_admin_setup_token
 from crm.database import get_session, init_db
 from crm.pages import audit, dashboard, integrations_page
 from crm.pages.crud_pages import render_entity_page
-from crm.services import ROLE_LABELS, authenticate_user, can_access_page, ensure_initial_data
+from crm.services import (
+    ROLE_LABELS,
+    authenticate_user,
+    can_access_page,
+    ensure_initial_data,
+    get_user_count,
+    set_admin_password,
+)
 
 
 PAGE_DEFS = [
@@ -35,7 +43,7 @@ PAGE_DEFS = [
 def bootstrap() -> None:
     init_db()
     with get_session() as session:
-        result = ensure_initial_data(session)
+        result = ensure_initial_data(session, create_random_admin=False)
     if result.get("admin_created"):
         email = result.get("admin_email")
         generated = result.get("generated_password")
@@ -47,6 +55,10 @@ def bootstrap() -> None:
             )
         else:
             st.session_state["bootstrap_notice"] = "Admin inicial criado com a senha configurada nos secrets/env."
+    elif result.get("admin_updated"):
+        st.session_state["bootstrap_notice"] = "Senha do admin sincronizada com os secrets/env configurados."
+    elif result.get("setup_required"):
+        st.session_state["bootstrap_notice"] = "Crie a senha inicial do admin no painel abaixo."
 
 
 def apply_style() -> None:
@@ -78,24 +90,80 @@ def login_view() -> None:
     if notice := st.session_state.get("bootstrap_notice"):
         st.info(notice)
 
-    with st.form("login_form"):
-        email = st.text_input("E-mail", placeholder="admin@crm.local")
-        password = st.text_input("Senha", type="password")
-        submitted = st.form_submit_button("Entrar", type="primary")
+    login_tab, setup_tab = st.tabs(["Entrar", "Criar senha admin"])
 
-    if submitted:
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("E-mail", placeholder="admin@crm.local")
+            password = st.text_input("Senha", type="password")
+            submitted = st.form_submit_button("Entrar", type="primary")
+
+        if submitted:
+            with get_session() as session:
+                user = authenticate_user(session, email, password)
+                if not user:
+                    st.error("Credenciais inválidas.")
+                    return
+                st.session_state["current_user"] = {
+                    "id": user.id,
+                    "name": user.name,
+                    "email": user.email,
+                    "role": user.role,
+                }
+            st.rerun()
+
+    with setup_tab:
+        render_admin_password_setup()
+
+
+def render_admin_password_setup() -> None:
+    with get_session() as session:
+        user_count = get_user_count(session)
+
+    setup_token = get_admin_setup_token()
+    initial_setup = user_count == 0
+
+    if initial_setup:
+        st.info("Nenhum usuário existe ainda. Defina a senha inicial do admin.")
+    elif not setup_token:
+        st.warning(
+            "Para alterar a senha pelo painel quando já existe usuário, configure "
+            "`[admin].setup_token` nos Secrets do Streamlit e reinicie o app."
+        )
+
+    with st.form("admin_password_setup_form"):
+        admin_email = st.text_input("E-mail do admin", value=get_admin_email())
+        if not initial_setup:
+            provided_token = st.text_input("Código de configuração", type="password")
+        else:
+            provided_token = ""
+        new_password = st.text_input("Nova senha", type="password")
+        confirm_password = st.text_input("Confirmar senha", type="password")
+        submitted = st.form_submit_button("Salvar senha", type="primary")
+
+    if not submitted:
+        return
+
+    if not initial_setup:
+        if not setup_token:
+            st.error("Configure um setup_token nos Secrets antes de alterar a senha.")
+            return
+        if provided_token != setup_token:
+            st.error("Código de configuração inválido.")
+            return
+
+    if new_password != confirm_password:
+        st.error("As senhas não conferem.")
+        return
+
+    try:
         with get_session() as session:
-            user = authenticate_user(session, email, password)
-            if not user:
-                st.error("Credenciais inválidas.")
-                return
-            st.session_state["current_user"] = {
-                "id": user.id,
-                "name": user.name,
-                "email": user.email,
-                "role": user.role,
-            }
-        st.rerun()
+            result = set_admin_password(session, admin_email, new_password)
+        action = "criada" if result["created"] else "atualizada"
+        st.success(f"Senha do admin {action}. Agora faça login com {result['admin_email']}.")
+        st.session_state["bootstrap_notice"] = "Senha do admin configurada com sucesso."
+    except Exception as exc:
+        st.error(str(exc))
 
 
 def sidebar(current_user: dict) -> tuple[str, str]:

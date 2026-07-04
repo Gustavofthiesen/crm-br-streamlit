@@ -128,20 +128,34 @@ def can_mutate(role: str, page_key: str) -> bool:
     return can_access_page(role, page_key) and page_key not in READ_ONLY_PAGES
 
 
-def ensure_initial_data(session: Session) -> dict[str, Any]:
-    result: dict[str, Any] = {"admin_created": False, "generated_password": None}
+def ensure_initial_data(
+    session: Session,
+    create_random_admin: bool = True,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "admin_created": False,
+        "admin_updated": False,
+        "generated_password": None,
+        "setup_required": False,
+    }
     ensure_default_pipeline_stages(session)
 
+    admin_email = get_admin_email()
+    configured_password = get_admin_password()
     user_count = session.scalar(select(func.count(User.id))) or 0
     if user_count == 0:
-        password = get_admin_password()
+        password = configured_password
         generated_password = None
         if not password:
+            if not create_random_admin:
+                result["setup_required"] = True
+                result["admin_email"] = admin_email
+                return result
             password = token_secrets.token_urlsafe(14)
             generated_password = password
         admin = User(
             name="Administrador",
-            email=get_admin_email(),
+            email=admin_email,
             password_hash=hash_password(password),
             role="admin",
             is_active=True,
@@ -151,7 +165,60 @@ def ensure_initial_data(session: Session) -> dict[str, Any]:
         result["admin_created"] = True
         result["generated_password"] = generated_password
         result["admin_email"] = admin.email
+        return result
+
+    if configured_password:
+        admin = session.scalar(
+            select(User).where(func.lower(User.email) == admin_email.lower()).limit(1)
+        )
+        if admin is None:
+            admin = User(
+                name="Administrador",
+                email=admin_email,
+                password_hash=hash_password(configured_password),
+                role="admin",
+                is_active=True,
+            )
+            session.add(admin)
+            result["admin_created"] = True
+        elif not verify_password(configured_password, admin.password_hash):
+            admin.password_hash = hash_password(configured_password)
+            admin.role = "admin"
+            admin.is_active = True
+            result["admin_updated"] = True
+        session.commit()
+        result["admin_email"] = admin.email
     return result
+
+
+def get_user_count(session: Session) -> int:
+    return int(session.scalar(select(func.count(User.id))) or 0)
+
+
+def set_admin_password(session: Session, email: str, password: str) -> dict[str, Any]:
+    normalized_email = email.strip().lower()
+    if len(password) < 8:
+        raise ValueError("A senha deve ter pelo menos 8 caracteres.")
+
+    admin = session.scalar(
+        select(User).where(func.lower(User.email) == normalized_email).limit(1)
+    )
+    created = admin is None
+    if admin is None:
+        admin = User(
+            name="Administrador",
+            email=normalized_email,
+            password_hash=hash_password(password),
+            role="admin",
+            is_active=True,
+        )
+        session.add(admin)
+    else:
+        admin.password_hash = hash_password(password)
+        admin.role = "admin"
+        admin.is_active = True
+    session.commit()
+    return {"created": created, "admin_email": admin.email}
 
 
 def ensure_default_pipeline_stages(session: Session) -> None:
