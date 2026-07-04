@@ -65,7 +65,7 @@ streamlit run app.py
 
 Se `CRM_ADMIN_PASSWORD` ou `[admin].password` não estiver configurado antes do primeiro seed, o sistema gera uma senha temporária e a imprime uma vez no terminal/log.
 Quando `[admin].password` ou `CRM_ADMIN_PASSWORD` é configurado depois, o app sincroniza a senha do admin no próximo restart.
-Também existe o painel "Criar senha admin" na tela de login. Ele cria a senha inicial quando ainda não há usuários; para resetar depois disso, configure `[admin].setup_token` ou `CRM_SETUP_TOKEN` e informe esse código no painel.
+Também existe o painel "Criar senha admin" na tela de login. No MVP, ele cria ou altera a senha do admin diretamente.
 
 ## Secrets
 
@@ -77,7 +77,6 @@ Exemplo mínimo:
 [admin]
 email = "admin@crm.local"
 password = "uma-senha-forte"
-setup_token = "codigo-temporario-para-reset"
 
 [database]
 url = "sqlite:///crm_br_streamlit.db"

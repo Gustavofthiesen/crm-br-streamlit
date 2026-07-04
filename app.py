@@ -9,7 +9,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from crm.config import get_admin_email, get_admin_setup_token
+from crm.config import get_admin_email
 from crm.database import get_session, init_db
 from crm.pages import audit, dashboard, integrations_page
 from crm.pages.crud_pages import render_entity_page
@@ -120,37 +120,21 @@ def render_admin_password_setup() -> None:
     with get_session() as session:
         user_count = get_user_count(session)
 
-    setup_token = get_admin_setup_token()
     initial_setup = user_count == 0
 
     if initial_setup:
         st.info("Nenhum usuário existe ainda. Defina a senha inicial do admin.")
-    elif not setup_token:
-        st.warning(
-            "Para alterar a senha pelo painel quando já existe usuário, configure "
-            "`[admin].setup_token` nos Secrets do Streamlit e reinicie o app."
-        )
+    else:
+        st.info("Modo MVP: este painel altera a senha do admin diretamente.")
 
     with st.form("admin_password_setup_form"):
         admin_email = st.text_input("E-mail do admin", value=get_admin_email())
-        if not initial_setup:
-            provided_token = st.text_input("Código de configuração", type="password")
-        else:
-            provided_token = ""
         new_password = st.text_input("Nova senha", type="password")
         confirm_password = st.text_input("Confirmar senha", type="password")
         submitted = st.form_submit_button("Salvar senha", type="primary")
 
     if not submitted:
         return
-
-    if not initial_setup:
-        if not setup_token:
-            st.error("Configure um setup_token nos Secrets antes de alterar a senha.")
-            return
-        if provided_token != setup_token:
-            st.error("Código de configuração inválido.")
-            return
 
     if new_password != confirm_password:
         st.error("As senhas não conferem.")
